@@ -1,0 +1,6 @@
+Revision history for Perl extension Config::RecurseINI.
+
+0.01  Wed Apr 27 20:26:26 2016
+	- original version; created by h2xs 1.23 with options
+		-A -X -n Config::RecurseINI
+

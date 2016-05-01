@@ -1,0 +1,6 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/Config-RecurseINI.t
+lib/Config/RecurseINI.pm

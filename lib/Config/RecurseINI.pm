@@ -1,0 +1,279 @@
+package Config::RecurseINI;
+
+use strict;
+use warnings;
+
+use base 'Exporter';
+use Cwd qw(abs_path);
+use Carp;
+
+use Getopt::Long;
+use Config::Tiny;
+
+our @EXPORT_OK = qw(config debug verbose);
+my %exports = map { $_ => 1 } @EXPORT_OK;
+
+our $VERSION = '0.9.0';
+
+my $defaultpath 	= abs_path($0);
+$defaultpath			=~s{/\w?bin/[^/]+$}{/config/};
+my $scriptpath		= $0;
+my ($scriptname)	= $scriptpath =~ m{([^/]+)$};
+$scriptname =~ s{\.pl$}{};
+
+my @configdirs  = ();
+if ($ENV{HOME}) {
+	push @configdirs, $ENV{HOME}, $ENV{HOME}.'/.config';
+}
+push @configdirs, '/etc/', $defaultpath;
+
+my $configname	= '';
+
+my $debug 			= -1;
+my $verbose 		= -1;
+my $readstrict 	= 0;
+
+my %params=();
+
+############################
+# import
+#     IN: list of subs to export
+#    OUT: 
+#GoodFor: import methods
+sub import {
+  my $class = shift;
+	unless ($configname and !$exports{ $_[0] } ) {
+		$configname = shift;
+	}
+	@_ = grep { $exports{ $_ } } @_;
+
+	_read_config() unless %params;
+
+	$class->Exporter::export_to_level(1, $class, @_);
+}
+
+############################
+# debug
+#     IN: 0 
+#    OUT: $debuglevel
+#GoodFor: check if debug is active
+sub debug {
+	_read_config() unless %params;
+
+	return $debug;
+} 
+
+############################
+# verbose
+#     IN: 0 
+#    OUT: $verboselevel
+#GoodFor: check if verbose is active
+sub verbose {
+	_read_config() unless %params;
+
+	return $verbose;
+} 
+
+############################
+# config
+#     IN: 
+#    OUT: 
+#GoodFor: 
+my %config=();
+sub config {
+	my $section;
+	my %args = ();
+	if ( scalar @_ == 2 ) {
+		%args = (section => shift, configkey => shift);
+	} else {
+		$section = shift if scalar @_ %2;
+		%args = @_;
+	}
+
+	$section ||= delete $args{section};
+	my $key = delete $args{configkey};
+	
+	_read_config(%args)
+		unless %config and (!$args{strict} or $readstrict);
+
+	my %sec = $section ? %{$config{$section}||{}} : %config;
+	if ($key) {
+		return $sec{$key};
+	}
+	
+	return wantarray ? %sec : \%sec;
+} 
+
+############################
+# _read_config
+#     IN: %args - see docs
+#    OUT: \%config
+#GoodFor: Read the full configuration for a script
+sub _read_config {
+	my %args=@_;
+	my $strict = $args{strict} || 0;
+
+	my ($cpkg) = caller(1);
+	my $checks;
+	if ($args{config_check}) {
+		$checks = $args{config_check}->();
+	} elsif (my $chk=$cpkg->can('config_check')) {
+		$checks = $chk->();
+	}
+	if ($strict and !$checks) {
+		croak "Can't use strict mode without a config_check\n";
+	}
+
+	my %parms = get_params();
+	get_env_params(\%parms);
+
+	my $cfname = $parms{config};
+	$cfname = _get_best_config() unless $cfname;
+
+	my $cfg = Config::Tiny->read($cfname);
+	unless ($cfg) {
+		my $err = Config::Tiny->errstr;
+		croak "Error reading config '$cfname': << $err >> " if $err;
+	}
+
+	$debug>-1 or $debug = $cfg->{_}->{debug} || 0;
+	$verbose>-1 or $verbose = $cfg->{_}->{verbose} || 0;
+
+	my %isa = ();
+	for my $s (keys %$cfg) {
+		next if $s eq '_';
+
+		for my $k (keys %{$cfg->{$s}}) {
+			next if $k eq '_isa';
+
+			my $chk = $checks->{$s}->{$k};
+			if ($strict and !$chk) {
+				croak "config option [$s]$k not needed";
+			}
+			if ($chk and $chk->{check}) {
+				if ($cfg->{$s}->{$k}=~$chk->{check}) {
+					$config{$s}{$k} = $cfg->{$s}{$k};
+				} else {
+					croak "config option [$s]$k='$cfg->{$s}{$k}' is not valid";
+				}
+			} else {
+				$config{$s}{$k} = $cfg->{$s}{$k};
+			}
+		}
+
+		if ( $cfg->{ $s }->{_isa} ) {
+			$isa{ $s } = [ split /\s*[,;]\s*/, $cfg->{ $s }->{_isa} ];
+		}
+	}
+
+	my $_isa;
+	my %_isaseen;
+	$_isa = sub {
+		my $s = shift;
+		return if $_isaseen{ $s };
+		$_isaseen{ $s }++;
+		for my $ds ( @{ $isa{$s} }) {
+			if ($isa{ $ds }) {
+				$_isa->($ds);
+			}
+			for my $k (keys %{ $config{ $ds } }) {
+				$config{ $s }{ $k } = $config{ $ds }{ $k }
+					unless exists $config{ $s }{ $k };
+			}
+		}
+		$_isaseen{ $s }--;
+	};
+
+	for my $s (keys %isa) {
+		%_isaseen = ();
+		$_isa->($s) if $isa{ $s };
+	}
+
+	if ($checks) {
+		for my $s (keys %$checks) {
+			for my $k (keys %{$checks->{$s}}) {
+				$config{$s}{$k} = $checks->{$s}{$k}{default}
+					if (exists $checks->{$s}{$k}{default}
+						and !exists $config{$s}{$k});
+
+				croak "Missing config option [$s]$k"
+					if $checks->{$s}{$k}{needed}
+						and !exists $config{$s}{$k};
+			}
+		}
+	}
+
+}
+
+############################
+# _get_best_config
+#     IN: 0
+#    OUT: filename for the config file
+#GoodFor: find the config file name
+sub _get_best_config {
+	carp "Can't guess the config file for -e [use --config]"
+		if !$configname and $scriptname eq '-e';
+
+  $configname ||= $scriptname;
+
+	for my $dir (@configdirs) {
+    next unless -d $dir;
+
+		my @fnames = ("$configname.ini", "$configname.conf");
+		unshift @fnames, ".$configname" if $dir eq $ENV{HOME}//'';
+
+    $dir .= '/' unless substr($dir, -1) eq '/';
+    for my $cfgname (@fnames) {
+      $cfgname = $dir.$cfgname;
+  		$debug>4 and print STDERR "trying configfile=$cfgname\n";
+	  	if (-r $cfgname) {
+		  	$verbose>2 and print STDERR "guessed configfile='$cfgname'\n";
+			  return $cfgname;
+		  }
+    }
+	}
+
+	croak "Unable to guess a config file for '$scriptname'";
+} 
+
+############################
+# get_params
+#     IN: 0
+#    OUT: %params
+#GoodFor: Get the params that the script got
+sub get_params {
+	return %params if %params;
+	%params=(config=>'',setconfig=>{});
+	GetOptions(
+		#config params
+		"config=s"	=> \$params{config},
+		"setconfig=s%" => $params{setconfig},
+
+		#debug and info
+		"debug=i"		=> \$debug,
+		"nodebug"		=> sub { $debug=0 },
+		"verbose=i"	=> \$verbose,
+		"noverbose"	=> sub { $verbose=0 },
+	);
+
+	return %params;
+} 
+
+############################
+# get_env_params
+#     IN: \%params
+#    OUT: 0
+#GoodFor: get params from %ENV
+sub get_env_params {
+	my $parms=shift;
+
+	$parms->{config} ||= $ENV{'CONFIG_FILE'} || '';
+	$debug  	= $ENV{'DEBUG'}
+		if $debug<0 and exists $ENV{'DEBUG'};
+	$verbose	= $ENV{'VERBOSE'}
+		if $verbose<0 and exists $ENV{'VERBOSE'};
+} 
+
+1;
+__END__
+
