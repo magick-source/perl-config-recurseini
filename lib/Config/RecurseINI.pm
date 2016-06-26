@@ -16,10 +16,12 @@ my %exports = map { $_ => 1 } @EXPORT_OK;
 our $VERSION = '0.9.0';
 
 my $defaultpath 	= abs_path($0);
-$defaultpath			=~s{/\w?bin/[^/]+$}{/config/};
+unless ($defaultpath =~ s{/\w?bin/[^/]+$}{/config/}) {
+  $defaultpath =~ s{/[^/]+$}{/};
+}
 my $scriptpath		= $0;
 my ($scriptname)	= $scriptpath =~ m{([^/]+)$};
-$scriptname =~ s{\.pl$}{};
+$scriptname =~ s{\.(pl|t)$}{};
 
 my @configdirs  = ();
 if ($ENV{HOME}) {
@@ -276,4 +278,136 @@ sub get_env_params {
 
 1;
 __END__
+
+=head1 NAME
+
+Config::RecurseINI - some extras on top of Config::Tiny
+
+=head1 SYNOPSIS
+
+    use Config::RecurseINI 'someapp' => qw(config);
+
+    my $dbname = config('database','dbname');
+    my %dbconfig = config('database');
+
+=head1 DESCRIPTION
+
+Config::RecuseINI adds two main things on top of Config::Tiny:
+
+=over 4
+
+=item Config Inheritance
+
+You can define one section as being the same as other section with
+some extras (or overrides):
+
+  [dabatase]
+  hostname=127.0.0.1
+  username=dbuser
+  password=passwd
+
+  [database:users]
+  _isa=database
+  dbname=user
+
+  [database:posts]
+  _isa=database
+  dbname=posts
+
+when calling config('database:users') config::RecurseINI will return
+
+   {  hostname  => '127.0.0.1',
+      username  => 'dbuser',
+      password  => 'passwd',
+      dbname    => 'user',
+   }
+
+=item Config Discovery
+
+Config::RecurseINI looks for the config file - see bellow L<config-name> -
+in several places, in order:
+
+=over 4
+
+=item - $HOME/
+
+if the env variable $HOME is defined, it will look for a file named
+.<config-name> - this is the only e
+
+=item - $HOME/.config/
+
+=item - /etc/
+
+=item - .../config/
+
+if $0 is in a .../bin/ or .../?bin/ directory, it looks for a config file
+in a config directory in the parent of that directory.
+
+=back
+
+=back
+
+=head2 config-name
+
+the first time you use Config::RecurseINI you can define what is the name
+of the config file if that is not given, the basename of $0 will be used
+
+example:
+
+  use Config::RecurseINI 'someapp' => qw(config);
+
+either way, that will be only the basename of the config file, and the
+name will be appended with .ini or .conf - both will be search for, in
+that order.
+
+=head1 METHODS
+
+=head2 config($section[, $key])
+
+config can take one or two parameters - the first will return a full config
+section, while the second will return the value of a specific config key
+in that section.
+
+In case of usage with only one parameter, config will return an HASH or
+an hashref, depending on context.
+
+=head2 debug
+
+Config::RecurseINI uses several different ways to define what debug level
+will be used: env $DEBUG, the parameter --debug or the debug key in the
+root of your config file.
+
+=head2 versbose
+
+the same as with debug, $VERBOSE, --verbose and verbose key in the root
+section.
+
+=head1 BUG REPORTS and FEATURE REQUESTS
+
+Please report any bugs or request features in:
+
+=over 4
+
+=item github: https://github.com/themage/perl-config-recurseini
+
+=item Magick Source: http://magick-source.net/MagickPerl/Config-RecurseINI
+
+=back
+
+=head1 AUTHOR
+
+theMage E<lt>themage@magick-source.netE<gt>
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (C) 2016 by theMage
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.22.1 or,
+at your option, any later version of Perl 5 you may have available.
+
+Alternativally, you can also redistribute it and/or modify it
+under the terms of the GPL 2.0 licence (or any future version of it).
+
+=cut
 

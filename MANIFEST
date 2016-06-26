@@ -1,6 +1,9 @@
 Changes
+lib/Config/RecurseINI.pm
+LICENCE-artistic-2_0.txt
+LICENCE-gpl-2.0.txt
 Makefile.PL
 MANIFEST
 README
+README.md
 t/Config-RecurseINI.t
-lib/Config/RecurseINI.pm
