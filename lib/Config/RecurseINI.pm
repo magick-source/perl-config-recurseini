@@ -13,7 +13,7 @@ use Config::Tiny;
 our @EXPORT_OK = qw(config debug verbose);
 my %exports = map { $_ => 1 } @EXPORT_OK;
 
-our $VERSION = '0.9.0';
+our $VERSION = '0.9.1';
 
 my $defaultpath 	= abs_path($0);
 unless ($defaultpath =~ s{/\w?bin/[^/]+$}{/config/}) {
